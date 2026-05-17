@@ -123,7 +123,12 @@ func (p *openaiProvider) ParseResponse(body []byte) (*Response, error) {
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
+				// Reasoning is returned by reasoning models (DeepSeek, Qwen, etc.)
+				// via OpenAI-compatible APIs. Surfaced for diagnostics — never
+				// used as fallback content.
+				Reasoning string `json:"reasoning"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Model string `json:"model"`
 		Usage struct {
@@ -145,9 +150,11 @@ func (p *openaiProvider) ParseResponse(body []byte) (*Response, error) {
 	}
 
 	return &Response{
-		Content:    result.Choices[0].Message.Content,
-		Model:      result.Model,
-		TokensUsed: result.Usage.TotalTokens,
+		Content:      result.Choices[0].Message.Content,
+		Model:        result.Model,
+		TokensUsed:   result.Usage.TotalTokens,
+		FinishReason: result.Choices[0].FinishReason,
+		Reasoning:    result.Choices[0].Message.Reasoning,
 		Usage: Usage{
 			InputTokens:  result.Usage.PromptTokens,
 			OutputTokens: result.Usage.CompletionTokens,

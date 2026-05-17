@@ -45,6 +45,48 @@ type Response struct {
 	Model      string
 	TokensUsed int
 	Usage      Usage // detailed breakdown
+
+	// FinishReason indicates why the model stopped generating.
+	// Common values: "stop" (natural end), "length" (hit max_tokens),
+	// "content_filter", "tool_calls". Empty if the provider didn't surface it.
+	FinishReason string
+
+	// Reasoning holds the model's chain-of-thought text when a reasoning model
+	// returns it in a separate field (e.g., DeepSeek, Qwen via OpenAI-compatible
+	// APIs). NOT used as fallback content — surfaced only for diagnostics so
+	// callers can report how many tokens reasoning consumed.
+	Reasoning string
+}
+
+// EmptyContentDetails returns a human-readable diagnostic string when an LLM
+// response has empty Content. Returns "" if Content is non-empty.
+//
+// The message includes finish_reason and the size of any reasoning output
+// (so users can tell when a reasoning model exhausted max_tokens on
+// chain-of-thought) along with actionable hints.
+func (r *Response) EmptyContentDetails() string {
+	if r == nil || r.Content != "" {
+		return ""
+	}
+	parts := []string{"LLM returned empty content"}
+	if r.FinishReason != "" {
+		parts = append(parts, fmt.Sprintf("finish_reason=%s", r.FinishReason))
+	}
+	if r.Reasoning != "" {
+		// rune count is a rough proxy for token count without pulling tiktoken
+		parts = append(parts, fmt.Sprintf("reasoning consumed %d chars", len([]rune(r.Reasoning))))
+	}
+	if r.Usage.OutputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("output_tokens=%d", r.Usage.OutputTokens))
+	}
+	msg := strings.Join(parts, ", ")
+	if r.FinishReason == "length" || r.Reasoning != "" {
+		msg += ". This usually means a reasoning model exhausted its token budget on chain-of-thought. " +
+			"Try raising compiler.summary_max_tokens (or article_max_tokens) — or, " +
+			"for models that support it, add `extra_params: { enable_thinking: false }` " +
+			"or `extra_params: { reasoning_effort: low }` to skip reasoning for this pass."
+	}
+	return msg
 }
 
 // Client is a provider-agnostic LLM client.

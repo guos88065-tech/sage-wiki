@@ -388,10 +388,12 @@ func summarizeChunks(
 			return nil, fmt.Errorf("group %d llm: %w", gi, err)
 		}
 
-		// Empty response guard
+		// Empty response guard — surface diagnostic detail (finish_reason,
+		// reasoning size) so users can tell reasoning-model truncation from
+		// other failure modes.
 		if strings.TrimSpace(resp.Content) == "" {
-			return nil, fmt.Errorf("group %d: LLM returned empty summary for %q (chunks %d-%d)",
-				gi, info.Path, group[0].Index, group[len(group)-1].Index)
+			return nil, fmt.Errorf("group %d: empty summary for %q (chunks %d-%d): %s",
+				gi, info.Path, group[0].Index, group[len(group)-1].Index, resp.EmptyContentDetails())
 		}
 
 		summaries = append(summaries, resp.Content)
@@ -479,7 +481,8 @@ func synthesizeHierarchical(summaries []string, sourcePath string, client *llm.C
 			}
 
 			if strings.TrimSpace(resp.Content) == "" {
-				return "", fmt.Errorf("synthesis returned empty result for %q", sourcePath)
+				return "", fmt.Errorf("synthesis returned empty result for %q: %s",
+					sourcePath, resp.EmptyContentDetails())
 			}
 
 			nextLevel = append(nextLevel, resp.Content)
