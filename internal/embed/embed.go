@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -192,6 +193,15 @@ func (e *APIEmbedder) Dimensions() int { return e.dims }
 const maxEmbedChars = 5000
 
 func (e *APIEmbedder) Embed(text string) ([]float32, error) {
+	// Whitespace-only input carries no semantic signal and is rejected outright by
+	// some OpenAI-compatible embedding endpoints — e.g. SiliconFlow's bge-m3 returns
+	// HTTP 400 ("code 20015: The parameter is invalid") for empty/newline-only input,
+	// which fails the embed for an entire chunk (commonly an empty section between
+	// headings). Short-circuit with a zero vector instead of a doomed API call; a
+	// zero vector is also the semantically correct representation of "no content".
+	if strings.TrimSpace(text) == "" {
+		return make([]float32, e.dims), nil
+	}
 	if e.limiter != nil {
 		e.limiter.wait()
 	}
@@ -220,8 +230,15 @@ func (e *APIEmbedder) embedOpenAILong(runes []rune) ([]float32, error) {
 		if end > len(runes) {
 			end = len(runes)
 		}
+		seg := string(runes[i:end])
+		// A rune-aligned chunk boundary can land inside a run of whitespace (e.g.
+		// blank lines between sections), producing an all-whitespace chunk that
+		// adds nothing to the mean pool and would 400 on bge-m3. Skip it.
+		if strings.TrimSpace(seg) == "" {
+			continue
+		}
 		vec, err := retryableEmbed(func() ([]float32, error) {
-			return e.embedOpenAI(string(runes[i:end]))
+			return e.embedOpenAI(seg)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("embed: chunk %d/%d: %w", chunks+1, (len(runes)+maxEmbedChars-1)/maxEmbedChars, err)
